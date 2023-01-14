@@ -355,7 +355,6 @@ int client_connect(struct Client *c) {
       return 1;
    }
 
-   char buf[200];
    struct addrinfo hints;
    memset(&hints, '\0', sizeof(hints));
 
@@ -532,7 +531,6 @@ int client_starttls(struct Client *c) {
    }
 
    int rc = tls_handshake(c->tls);
-   char buf[100];
    switch (rc) {
       case 0:
          log_account_(a, "tls_handshake: success");
