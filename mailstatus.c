@@ -49,7 +49,7 @@ struct Client {
    time_t timer2;
    size_t seq;
    size_t exists;
-   size_t us_cnt;
+   int us_cnt;
    int unseens[MAX_UNSEENS];
 };
 
@@ -121,9 +121,11 @@ void main_loop(const char *file, struct tls_config *cfg) {
 
    struct Client clients[num_accounts];
    struct pollfd pfds[num_accounts];
+   int last_cnts[num_accounts];
 
    for (int i = 0; i < num_accounts; i++) {
       client_init(&clients[i], cfg, &accounts[i]);
+      last_cnts[i] = -1;
    }
 
    while (true) {
@@ -205,6 +207,8 @@ void main_loop(const char *file, struct tls_config *cfg) {
                      continue;
                   }
 
+                  if (c->handler == client_idle_sent) print_unseens(c);
+
                   char *p1, *p2;
                   p1 = c->read_buffer;
                   while ((p2 = strstr(p1, CRLF)) != NULL) {
@@ -229,24 +233,35 @@ void main_loop(const char *file, struct tls_config *cfg) {
          }
       }
 
+      bool changed = false;
       char buf[200];
       char *p = buf;
       for (int i = 0; i < num_accounts; i++) {
          struct Client *c = &clients[i];
          struct Account *a = &accounts[i];
 
+         if (c->us_cnt != last_cnts[i]) changed = true;
+         last_cnts[i] = c->us_cnt;
+
          if (c->us_cnt > 0) {
-            p+= snprintf(buf, sizeof(buf) - (p - buf), "(%s: %d)", a->name, c->us_cnt);
+            p+= snprintf(p, sizeof(buf) - (p - buf), "(%s: %d) ", a->name, c->us_cnt);
          }
       }
-
-      FILE *fd = fopen(file, "w");
-      if (fd == NULL) {
-         err_app("File could not be opened: %s", file);
-         break;
+      if (p > buf) {
+         p+= snprintf(p, sizeof(buf) - (p - buf), "| ");
+      } else {
+         *p = '\0';
       }
-      if (p != buf) fprintf(fd, buf);
-      fclose(fd);
+
+      if (changed) {
+         FILE *fd = fopen(file, "w");
+         if (fd == NULL) {
+            err_app("File could not be opened: %s", file);
+            break;
+         }
+         if (p != buf) fprintf(fd, buf);
+         fclose(fd);
+      }
    }
 
    for (int i = 0; i < num_accounts; i++) {
@@ -329,6 +344,7 @@ void client_init(struct Client *c, struct tls_config *cfg, struct Account *a) {
    c->conn_cnt = 0;
    c->timer1 = 0;
    c->timer2 = 0;
+   for (int i = 0; i < MAX_UNSEENS; i++) c->unseens[i] = -1;
 }
 
 int client_connect(struct Client *c) {
@@ -606,8 +622,8 @@ int client_select_sent(struct Client *c, char *line) {
 void client_search(struct Client *c) {
    char buf[100];
 
+   for (int i = 0; i < c->us_cnt; i++) c->unseens[i] = -1;
    c->us_cnt = 0;
-   for (int i = 0; i < MAX_UNSEENS; i++) c->unseens[i] = -1;
 
    c->seq++;
    int len = snprintf(buf, sizeof(buf), "A%d SEARCH (UNSEEN)", c->seq);
@@ -714,26 +730,24 @@ int client_idle_sent(struct Client *c, char *line) {
 
    if (strcmp(tkn2, "FETCH") == 0) {
       if ((strstr(rest, "\\Seen")) == NULL) {
-         print_unseens(c);
          log_account(a, "Unseen Add: %d", num);
          add_unseens(c, num);
          print_unseens(c);
       } else {
-         print_unseens(c);
          log_account(a, "Unseen Remove: %d", num);
          remove_unseens(c, num);
          print_unseens(c);
       }
    } else if (strcmp(tkn2, "EXPUNGE") == 0) {
-      print_unseens(c);
       log_account(a, "Unseen Remove: %d", num);
       remove_unseens(c, num);
       print_unseens(c);
 
       c->exists--;
+      log_account(a, "Exists: %d", c->exists);
    } else if (strcmp(tkn2, "EXISTS") == 0) {
-      log_account(a, "Exists: %d", num);
       c->exists = num;
+      log_account(a, "Exists: %d", c->exists);
 
       client_idle_done(c);
       c->handler = client_idle_done_sent1;
@@ -818,7 +832,7 @@ void remove_unseens(struct Client* c, int num) {
 void print_unseens(struct Client *c) {
    char buf[300];
    char *p = buf;
-   p += snprintf(buf, sizeof(buf), "%d (", c->us_cnt);
+   p += snprintf(buf, sizeof(buf), "Unseen: %d (", c->us_cnt);
    for (int i = 0; i < c->us_cnt; i++) {
       p+= snprintf(p, sizeof(buf) - (p - buf), "%d,", c->unseens[i]);
    }
