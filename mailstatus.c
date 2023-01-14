@@ -44,6 +44,7 @@ struct Client {
    size_t nb_size;
    size_t needle_length;
 
+   size_t conn_cnt;
    time_t timer1;
    time_t timer2;
    size_t seq;
@@ -176,7 +177,7 @@ void main_loop(const char *file, struct tls_config *cfg) {
          if (p->revents == 0) continue;
 
          char buf[200];
-         log_account(a, "socket=%d, events=%d, phase=%d", c->socket, c->events, c->phase);
+         log_account(a, "socket=%d, events=%d, conn_cnt=%d, seq=%d, exists=%d", c->socket, c->events, c->conn_cnt, c->seq, c->exists);
          log_account(a, "pfd: fd=%d, events=%d, revents=%d", p->fd, p->events ^ POLLHUP, p->revents);
          if (p->revents == 0) continue;
 
@@ -325,6 +326,7 @@ void client_init(struct Client *c, struct tls_config *cfg, struct Account *a) {
    c->needle_buffer = NULL;
    c->nb_size = 0;
 
+   c->conn_cnt = 0;
    c->timer1 = 0;
    c->timer2 = 0;
 }
@@ -414,6 +416,8 @@ int client_connect(struct Client *c) {
    c->seq = 0;
    c->exists = 0;
    c->us_cnt = 0;
+
+   c->conn_cnt++;
    c->timer1 = time(NULL);
    c->timer2 = 0;
 
