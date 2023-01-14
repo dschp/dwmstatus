@@ -449,6 +449,7 @@ void client_disconnect(struct Client *c) {
    freeaddrinfo(c->addrinfo);
 
    c->phase = Disconnected;
+   c->events = 0;
    c->timer1 = time(NULL);
    c->timer2 = 0;
 }
@@ -477,37 +478,29 @@ ssize_t client_read(struct Client *c) {
    return rc;
 }
 
+bool _client_write(struct Client *c, const void *buf, size_t len) {
+   while (len > 0) {
+      ssize_t rc = tls_write(c->tls, buf, len);
+      if (rc == TLS_WANT_POLLIN || rc == TLS_WANT_POLLOUT)
+         continue;
+      if (rc == -1) {
+         return false;
+      }
+
+      buf += rc;
+      len -= rc;
+   }
+   return true;
+}
+
 ssize_t client_write(struct Client *c, const void *buf, size_t len, char *log) {
    log_account(c->account, ">>> tls_write: %d", len);
    log_account(c->account, "\"%s\"", log);
+   
+   if (! _client_write(c, buf, len)) return -1;
+   if (! _client_write(c, CRLF, sizeof(CRLF)-1)) return -1;
 
-   while (len > 0) {
-      ssize_t rc = tls_write(c->tls, buf, len);
-      if (rc == TLS_WANT_POLLIN || rc == TLS_WANT_POLLOUT)
-         continue;
-      if (rc == -1) {
-         return -1;
-      }
-
-      buf += rc;
-      len -= rc;
-   }
-
-   buf = CRLF;
-   len = sizeof(CRLF)-1;
-   while (len > 0) {
-      ssize_t rc = tls_write(c->tls, buf, len);
-      if (rc == TLS_WANT_POLLIN || rc == TLS_WANT_POLLOUT)
-         continue;
-      if (rc == -1) {
-         return -1;
-      }
-
-      buf += rc;
-      len -= rc;
-   }
-
-   return 0;
+   return len;
 }
 
 int client_starttls(struct Client *c) {
@@ -674,12 +667,13 @@ int client_idle_sent(struct Client *c, char *line) {
       return 0;
    }
 
-   time_t now = time(NULL);
-   if (now - c->timer2 > IDLE_TIME_LIMIT) {
+   time_t elapsed = time(NULL) - c->timer2;
+   if (elapsed > IDLE_TIME_LIMIT) {
       client_idle_done(c);
       c->handler = client_idle_done_sent1;
       return 0;
    }
+   log_account(a, "IDLE for %d/%d sec", elapsed, IDLE_TIME_LIMIT);
 
    if (strncmp(line, "* ", 2) != 0) {
       return 0;
