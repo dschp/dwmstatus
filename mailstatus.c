@@ -644,7 +644,7 @@ int client_search_sent(struct Client *c, char *line) {
          return 1;
       }
       p++;
-      log_account(a, "search is: '%s'", p);
+      log_account(a, "Search: '%s'", p);
 
       p = strtok(p, " ");
       while (p != NULL) {
@@ -659,7 +659,7 @@ int client_search_sent(struct Client *c, char *line) {
 
          p = strtok(NULL, " ");
       }
-      log_account(a, "unseens: %d", c->us_cnt);
+      print_unseens(c);
 
       return 0;
    }
