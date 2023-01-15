@@ -68,6 +68,7 @@ int client_select_sent(struct Client*, char*);
 void client_search(struct Client*);
 int client_search_sent(struct Client*, char*);
 int client_idle_sent(struct Client*, char*);
+void client_idle_check_time_limit(struct Client*, time_t);
 void client_idle_done(struct Client*);
 int client_idle_done_sent1(struct Client*, char*);
 int client_idle_done_sent2(struct Client*, char*);
@@ -201,14 +202,21 @@ void main_loop(const char *file, struct tls_config *cfg) {
                break;
             case Connected:
                if ((p->revents & POLLIN) != 0) {
+                  int (*hdlr)(struct Client*, char*) = c->handler;
+                  if (hdlr == NULL) {
+                     client_disconnect(c);
+                     continue;
+                  }
+                  if (hdlr == client_idle_sent)
+                     print_unseens(c);
+
                   rc = client_read(c);
                   if (rc == 0) {
                      client_disconnect(c);
+                     continue;
                   } else if (rc < 0) {
                      continue;
                   }
-
-                  if (c->handler == client_idle_sent) print_unseens(c);
 
                   char *p1, *p2;
                   p1 = c->read_buffer;
@@ -216,13 +224,14 @@ void main_loop(const char *file, struct tls_config *cfg) {
                      *p2 = '\0';
                      log_account(a, "\"%s\"", p1);
 
-                     if (c->handler != NULL) {
-                        c->handler(c, p1);
-                     }
+                     hdlr(c, p1);
 
                      p1 = p2 + 2;
                      if (p1 > c->read_buffer + c->rb_size) break;
                   }
+
+                  if (hdlr == client_idle_sent)
+                     client_idle_check_time_limit(c, now);
                }
                if ((p->revents & POLLOUT) != 0) {
                   client_starttls(c);
@@ -558,7 +567,7 @@ int client_starttls(struct Client *c) {
    struct Account *a = c->account;
 
    if (c->phase != Connected) {
-      err_account_(a, "client_connect: is Connected");
+      err_account_(a, "client_connect: is not Connected");
       return 1;
    }
 
@@ -717,14 +726,6 @@ int client_idle_sent(struct Client *c, char *line) {
       return 0;
    }
 
-   time_t elapsed = time(NULL) - c->timer2;
-   if (elapsed > IDLE_TIME_LIMIT) {
-      client_idle_done(c);
-      c->handler = client_idle_done_sent1;
-      return 0;
-   }
-   log_account(a, "IDLE for %d/%d sec", elapsed, IDLE_TIME_LIMIT);
-
    if (strncmp(line, "* ", 2) != 0) {
       return 0;
    }
@@ -788,6 +789,16 @@ int client_idle_sent(struct Client *c, char *line) {
    }
 
    return 0;
+}
+
+void client_idle_check_time_limit(struct Client *c, time_t now) {
+   struct Account *a = c->account;
+   time_t elapsed = now - c->timer2;
+   log_account(a, "IDLE for %d/%d sec", elapsed, IDLE_TIME_LIMIT);
+   if (elapsed > IDLE_TIME_LIMIT) {
+      client_idle_done(c);
+      c->handler = client_idle_done_sent1;
+   }
 }
 
 void client_idle_done(struct Client *c) {
