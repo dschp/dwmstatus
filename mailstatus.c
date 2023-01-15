@@ -500,9 +500,12 @@ ssize_t client_read(struct Client *c) {
                return rc;
          }
       }
-
       if (rc <= 0) break;
-      if (rc == len) {
+
+      bytes += rc;
+      if (rc < len) {
+         break;
+      } else {
          size_t new_size = c->rb_size * 2;
          void *new_ptr = realloc(c->read_buffer, new_size);
          if (new_ptr == NULL) {
@@ -515,8 +518,6 @@ ssize_t client_read(struct Client *c) {
          c->read_buffer = new_ptr;
          c->rb_size = new_size;
       }
-
-      bytes += rc;
    }
 
    if (bytes > 0) {
