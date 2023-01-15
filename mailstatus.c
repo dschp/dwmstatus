@@ -137,9 +137,9 @@ void main_loop(const char *file, struct tls_config *cfg) {
          struct Account *a = &accounts[i];
          struct pollfd *p = &pfds[i];
 
+         time_t elapsed = now - c->timer1;
          switch (c->phase) {
             case Disconnected:
-               time_t elapsed = now - c->timer1;
                if (elapsed > RECONNECT_INTERVAL) {
                   client_connect(c);
                } else if (now - c->timer2 > 10) {
@@ -149,8 +149,8 @@ void main_loop(const char *file, struct tls_config *cfg) {
                break;
             case Connected:
                // check inactivity
-               if (now - c->timer1 > INACTIVITY_TIME_LIMIT) {
-                  log_account(a, "now=%d, timer=%d", now, c->timer1);
+               if (elapsed > INACTIVITY_TIME_LIMIT) {
+                  log_account(a, "Inactivity: %d sec", elapsed);
                   if (c->handler == client_idle_sent) {
                      client_idle_done(c);
                   } else if (c->handler != client_logout_sent) {
