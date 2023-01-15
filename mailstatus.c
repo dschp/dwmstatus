@@ -11,10 +11,10 @@
 #include <time.h>
 
 #define MAX_ACCOUNTS 10
-#define MAX_UNSEENS 200
 #define CRLF "\r\n"
 #define READ_BUFFER_SIZE 2000
-#define NEEDLE_BUFFER_SIZE 200
+#define NEEDLE_BUFFER_SIZE 100
+#define UNSEENS_SIZE 100
 #define RECONNECT_INTERVAL 30
 #define INACTIVITY_TIME_LIMIT 200
 #define IDLE_TIME_LIMIT 25 * 60
@@ -40,7 +40,7 @@ struct Client {
 
    char *read_buffer;
    size_t rb_size;
-   char *needle_buffer;
+   char needle_buffer[NEEDLE_BUFFER_SIZE];
    size_t nb_size;
    size_t needle_length;
 
@@ -50,7 +50,8 @@ struct Client {
    size_t seq;
    size_t exists;
    int us_cnt;
-   int unseens[MAX_UNSEENS];
+   int *unseens;
+   size_t us_size;
 };
 
 int setup_config(struct tls_config *cfg);
@@ -338,13 +339,15 @@ void client_init(struct Client *c, struct tls_config *cfg, struct Account *a) {
 
    c->read_buffer = NULL;
    c->rb_size = 0;
-   c->needle_buffer = NULL;
-   c->nb_size = 0;
+   c->nb_size = sizeof(c->needle_buffer);
+
+   c->us_cnt = 0;
+   c->unseens = NULL;
+   c->us_size = 0;
 
    c->conn_cnt = 0;
    c->timer1 = 0;
    c->timer2 = 0;
-   for (int i = 0; i < MAX_UNSEENS; i++) c->unseens[i] = -1;
 }
 
 int client_connect(struct Client *c) {
@@ -417,12 +420,12 @@ int client_connect(struct Client *c) {
       c->rb_size = READ_BUFFER_SIZE;
    }
 
-   if (c->needle_buffer == NULL) {
-      if ((c->needle_buffer = malloc(NEEDLE_BUFFER_SIZE)) == NULL) {
-         err_account_(a, "needle_buffer: malloc failed");
+   if (c->unseens == NULL) {
+      if ((c->unseens = malloc(sizeof(int) * UNSEENS_SIZE)) == NULL) {
+         err_account_(a, "unseens: malloc failed");
          return -1;
       }
-      c->nb_size = NEEDLE_BUFFER_SIZE;
+      c->us_size = UNSEENS_SIZE;
    }
 
    c->phase = Connected;
@@ -435,6 +438,8 @@ int client_connect(struct Client *c) {
    c->conn_cnt++;
    c->timer1 = time(NULL);
    c->timer2 = 0;
+
+   for (int i = 0; i < c->us_size; i++) c->unseens[i] = -1;
 
    snprintf(c->needle_buffer, c->nb_size, "* OK");
    return 0;
@@ -476,25 +481,49 @@ void client_disconnect(struct Client *c) {
 ssize_t client_read(struct Client *c) {
    struct Account *a = c->account;
 
-   int rc = tls_read(c->tls, c->read_buffer, c->rb_size);
-   log_account(a, "<<< tls_read: %d", rc);
+   void *ptr = c->read_buffer;
+   size_t len = c->rb_size;
+   size_t bytes = 0;
+   while (true) {
+      int rc = tls_read(c->tls, ptr, len);
+      log_account(a, "<<< tls_read: %d", rc);
 
-   switch (rc) {
-      case TLS_WANT_POLLIN:
-         err_account_(a, "tls_read: TLS_WANT_POLLIN");
-         c->events = POLLIN;
-         break;
-      case TLS_WANT_POLLOUT:
-         err_account_(a, "tls_read: TLS_WANT_POLLOUT");
-         c->events = POLLOUT;
-         break;
-      default:
-         c->timer1 = time(NULL);
-         break;
+      if (bytes == 0) {
+         switch (rc) {
+            case TLS_WANT_POLLIN:
+               err_account_(a, "tls_read: TLS_WANT_POLLIN");
+               c->events = POLLIN;
+               return rc;
+            case TLS_WANT_POLLOUT:
+               err_account_(a, "tls_read: TLS_WANT_POLLOUT");
+               c->events = POLLOUT;
+               return rc;
+         }
+      }
+
+      if (rc <= 0) break;
+      if (rc == len) {
+         size_t new_size = c->rb_size * 2;
+         void *new_ptr = realloc(c->read_buffer, new_size);
+         if (new_ptr == NULL) {
+            err_account(a, "read_buffer realloc failed: {%p} %d -> %d", c->read_buffer, c->rb_size, new_size);
+            exit(1);
+         }
+
+         ptr = new_ptr + rc;
+         len = c->rb_size;
+         c->read_buffer = new_ptr;
+         c->rb_size = new_size;
+      }
+
+      bytes += rc;
    }
 
-   if (rc > 0) ((char *) c->read_buffer)[rc] = '\0';
-   return rc;
+   if (bytes > 0) {
+      c->timer1 = time(NULL);
+      ((char *) c->read_buffer)[bytes] = '\0';
+   }
+   return bytes;
 }
 
 bool _client_write(struct Client *c, const void *buf, size_t len) {
@@ -799,15 +828,27 @@ int client_logout_sent(struct Client *c, char *line) {
 }
 
 void add_unseens(struct Client* c, int num) {
-   for (int i = 0; i < MAX_UNSEENS; i++) {
+   int i = 0;
+   for (; i < c->us_cnt; i++) {
       if (c->unseens[i] == num) {
-         break;
-      } else if (c->unseens[i] == -1) {
-         c->us_cnt++;
-         c->unseens[i] = num;
-         break;
+         return;
       }
    }
+   if (i > c->us_size) {
+      size_t new_size = c->us_size * 2;
+      int *new_ptr = realloc(c->unseens, sizeof(int) * new_size);
+      if (new_ptr == NULL) {
+         err_account(c->account, "unseens realloc failed: {%p} %d -> %d", c->unseens, c->us_size, new_size);
+         exit(1);
+      }
+
+      c->unseens = new_ptr;
+      c->us_size = new_size;
+      for (int j = i; j < c->us_size; j++) c->unseens[j] = -1;
+   }
+
+   c->us_cnt++;
+   c->unseens[i] = num;
 }
 
 void remove_unseens(struct Client* c, int num) {
@@ -819,9 +860,6 @@ void remove_unseens(struct Client* c, int num) {
          } else {
             c->unseens[i] = c->unseens[c->us_cnt];
          }
-         break;
-      } else if (c->unseens[i] == -1) {
-         c->us_cnt = i;
          break;
       }
    }
