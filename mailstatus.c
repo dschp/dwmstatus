@@ -272,6 +272,8 @@ void main_loop(const char *file, struct tls_config *cfg) {
       free(accounts[i].name);
       if (clients[i].read_buffer != NULL)
          free(clients[i].read_buffer);
+      if (clients[i].unseens != NULL)
+         free(clients[i].unseens);
    }
 }
 
