@@ -76,10 +76,10 @@ int client_logout_sent(struct Client*, char*);
 
 void add_unseens(struct Client*, int);
 void remove_unseens(struct Client*, int);
+void decrement_unseens(struct Client*, int);
 void print_unseens(struct Client*);
 
 void main_loop(const char *, struct tls_config*);
-void *client_worker(void *);
 
 #define log_app(fmt,...) fprintf(stdout, fmt "\n", __VA_ARGS__);
 #define log_app_(msg) fprintf(stdout, msg "\n");
@@ -756,7 +756,7 @@ int client_idle_sent(struct Client *c, char *line) {
       log_account(a, "Tokens: %s|%s|%s", tkn1, tkn2, rest);
    }
 
-   int num = strtol(tkn1, NULL, 10);
+   const int num = strtol(tkn1, NULL, 10);
 
    if (strcmp(tkn2, "FETCH") == 0) {
       if ((strstr(rest, "\\Seen")) == NULL) {
@@ -775,6 +775,10 @@ int client_idle_sent(struct Client *c, char *line) {
 
       c->exists--;
       log_account(a, "Exists: %d", c->exists);
+
+      log_account_(a, "Unseen Decrement");
+      decrement_unseens(c, num);
+      print_unseens(c);
    } else if (strcmp(tkn2, "EXISTS") == 0) {
       c->exists = num;
       log_account(a, "Exists: %d", c->exists);
@@ -864,6 +868,14 @@ void remove_unseens(struct Client* c, int num) {
             c->unseens[i] = c->unseens[c->us_cnt];
          }
          break;
+      }
+   }
+}
+
+void decrement_unseens(struct Client* c, int num) {
+   for (int i = 0; i < c->us_cnt; i++) {
+      if (c->unseens[i] > num) {
+         c->unseens[i] -= 1;
       }
    }
 }
