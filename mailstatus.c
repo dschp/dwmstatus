@@ -34,11 +34,12 @@ struct Client {
    struct tls *tls;
    int socket;
 
-   short events;
    enum Phase {Disconnected, Connected} phase;
+   short events;
    int (*handler)(struct Client*, char *line);
 
    char *read_buffer;
+   char *rb_cur_pos;
    size_t rb_size;
    char needle_buffer[NEEDLE_BUFFER_SIZE];
    size_t nb_size;
@@ -233,7 +234,7 @@ void main_loop(const char *file, struct tls_config *cfg) {
                   if (hdlr == client_idle_sent)
                      client_idle_check_time_limit(c, now);
                }
-               if ((p->revents & POLLOUT) != 0) {
+               if (c->handler == NULL && (p->revents & POLLOUT) != 0) {
                   client_starttls(c);
                   c->needle_length = snprintf(c->needle_buffer, c->nb_size, "* OK");
                   c->handler = client_login;
@@ -344,11 +345,11 @@ void client_init(struct Client *c, struct tls_config *cfg, struct Account *a) {
    c->tls = NULL;
    c->socket = -1;
 
-   c->events = 0;
    c->phase = Disconnected;
-   c->handler = NULL;
+   c->events = 0;
 
    c->read_buffer = NULL;
+   c->rb_cur_pos = NULL;
    c->rb_size = 0;
    c->nb_size = sizeof(c->needle_buffer);
 
@@ -429,6 +430,7 @@ int client_connect(struct Client *c) {
          return -1;
       }
       c->rb_size = READ_BUFFER_SIZE;
+      c->rb_cur_pos = c->read_buffer;
    }
 
    if (c->unseens == NULL) {
@@ -441,6 +443,7 @@ int client_connect(struct Client *c) {
 
    c->phase = Connected;
    c->events = POLLOUT;
+   c->handler = NULL;
 
    c->seq = 0;
    c->exists = 0;
@@ -492,30 +495,30 @@ void client_disconnect(struct Client *c) {
 ssize_t client_read(struct Client *c) {
    struct Account *a = c->account;
 
-   void *ptr = c->read_buffer;
-   size_t len = c->rb_size;
-   size_t bytes = 0;
+   size_t len = c->rb_size - (c->rb_cur_pos - c->read_buffer);
    while (true) {
-      int rc = tls_read(c->tls, ptr, len);
+      int rc = tls_read(c->tls, c->rb_cur_pos, len);
       log_account(a, "<<< tls_read: %d", rc);
 
-      if (bytes == 0) {
+      if (rc <= 0) {
          switch (rc) {
             case TLS_WANT_POLLIN:
                err_account_(a, "tls_read: TLS_WANT_POLLIN");
                c->events = POLLIN;
-               return rc;
+               break;
             case TLS_WANT_POLLOUT:
                err_account_(a, "tls_read: TLS_WANT_POLLOUT");
                c->events = POLLOUT;
-               return rc;
+               break;
          }
+         return rc;
       }
-      if (rc <= 0) break;
 
-      bytes += rc;
+      c->rb_cur_pos += rc;
+      if (strncmp(CRLF, c->rb_cur_pos - 2, 2) == 0) break;
+
       if (rc < len) {
-         break;
+         len -= rc;
       } else {
          size_t new_size = c->rb_size * 2;
          void *new_ptr = realloc(c->read_buffer, new_size);
@@ -524,16 +527,18 @@ ssize_t client_read(struct Client *c) {
             exit(1);
          }
 
-         ptr = new_ptr + rc;
+         c->rb_cur_pos = new_ptr + (c->rb_cur_pos - c->read_buffer);
          len = c->rb_size;
          c->read_buffer = new_ptr;
          c->rb_size = new_size;
       }
    }
 
+   size_t bytes = c->rb_cur_pos - c->read_buffer;
    if (bytes > 0) {
       c->timer1 = time(NULL);
-      ((char *) c->read_buffer)[bytes] = '\0';
+      *c->rb_cur_pos = '\0';
+      c->rb_cur_pos = c->read_buffer;
    }
    return bytes;
 }
@@ -558,7 +563,7 @@ ssize_t client_write(struct Client *c, const void *buf, size_t len, char *log) {
    log_account(c->account, "\"%s\"", log);
    
    if (! _client_write(c, buf, len)) return -1;
-   if (! _client_write(c, CRLF, sizeof(CRLF)-1)) return -1;
+   if (! _client_write(c, CRLF, 2)) return -1;
 
    return len;
 }
