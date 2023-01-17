@@ -154,6 +154,7 @@ void main_loop(const char *file, struct tls_config *cfg) {
                   log_account(a, "Inactivity: %d sec", elapsed);
                   if (c->handler == client_idle_sent) {
                      client_idle_done(c);
+                     c->handler = client_idle_done_sent2;
                   } else if (c->handler != client_logout_sent) {
                      client_logout(c);
                   } else {
