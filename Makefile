@@ -1,5 +1,5 @@
-LIBRESSL_INC = /opt/libressl/include
-LIBRESSL_LIB = /opt/libressl/gnu/lib64
+LIBRESSL_INC = /usr/include/libressl
+LIBRESSL_LIB = /usr/lib/libressl
 
 CC_ARGS =
 

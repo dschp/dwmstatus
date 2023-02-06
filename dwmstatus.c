@@ -6,14 +6,20 @@
 #include <unistd.h>
 
 void main(int argc, char *argv[]) {
+   char *env_dsp = getenv("DISPLAY");
+   if (env_dsp == NULL) {
+      fprintf(stderr, "Envvar DISPLAY not defined\n");
+      exit(1);
+   }
+
    for (int i = 0; i < argc; i++) {
       printf("[%d] %s\n", i, argv[i]);
    }
 
-   Display* dsp = XOpenDisplay(":0");
+   Display* dsp = XOpenDisplay(env_dsp);
    if (dsp == NULL) {
       fprintf(stderr, "XOpenDisplay error\n");
-      exit(1);
+      exit(2);
    }
    
    Window win = DefaultRootWindow(dsp);

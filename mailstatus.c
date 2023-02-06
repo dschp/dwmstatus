@@ -4,7 +4,7 @@
 #include <string.h>
 #include <tls.h>
 #include <netdb.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <errno.h>
@@ -293,7 +293,7 @@ int setup_config(struct tls_config *cfg) {
       err_app_("tls_config_set_protocols failed");
       return 1;
    }
-   if (tls_config_set_ca_file(cfg, "/opt/libressl/etc/ssl/cert.pem") != 0) {\
+   if (tls_config_set_ca_file(cfg, "/etc/libressl/cert.pem") != 0) {\
       err_app_("tls_config_set_ca_file failed");
       return 2;
    }
