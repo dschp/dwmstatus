@@ -49,7 +49,7 @@ void main(int argc, char *argv[]) {
 
       setenv("TZ", ":Asia/Tokyo", 1);
       tm = localtime(&now);
-      idx += strftime(&buf[idx], sizeof(buf) - idx, "EST:\x05%R\x01 ", tm);
+      idx += strftime(&buf[idx], sizeof(buf) - idx, "JST:\x05%R\x01 ", tm);
 
       setenv("TZ", ":Asia/Bangkok", 1);
       tm = localtime(&now);
