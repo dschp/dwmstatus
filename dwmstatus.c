@@ -45,7 +45,7 @@ void main(int argc, char *argv[]) {
       idx += strftime(&buf[idx], sizeof(buf) - idx, "EST:\x03%R\x01 ", tm);
 
       tm = gmtime(&now);
-      idx += strftime(&buf[idx], sizeof(buf) - idx, "GMT:\x04%R\x01 ", tm);
+      idx += strftime(&buf[idx], sizeof(buf) - idx, "UTC:\x04%R\x01 ", tm);
 
       setenv("TZ", ":Asia/Tokyo", 1);
       tm = localtime(&now);
