@@ -51,18 +51,18 @@ void main(int argc, char *argv[]) {
 
     setenv("TZ", ":EST", 1);
     tm = localtime(&now);
-    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "EST:\x03%R\x01 ", tm);
+    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "EST: \x01\x03%R\x01\x01  ", tm);
 
     tm = gmtime(&now);
-    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "UTC:\x04%R\x01 ", tm);
+    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "UTC: \x01\x04%R\x01\x01  ", tm);
 
     setenv("TZ", ":Asia/Tokyo", 1);
     tm = localtime(&now);
-    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "JST:\x05%R\x01 ", tm);
+    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "JST: \x01\x05%R\x01\x01  ", tm);
 
     setenv("TZ", ":Asia/Bangkok", 1);
     tm = localtime(&now);
-    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "%F (%a) \x06%T\x01", tm);
+    p += strftime(p, sizeof(dtbuf) - (p - dtbuf), "%F (%a)  \x01\x06%T\x01\x01 ", tm);
 
     p += snprintf(p, sizeof(dtbuf) - (p - dtbuf), " [%d]", tm->tm_year + 1900 + 543);
 
